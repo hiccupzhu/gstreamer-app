@@ -1,0 +1,4 @@
+<root>
+	<source>audiotestsrc</source>
+	<others>queue ! autoaudiosink</others>
+</root>

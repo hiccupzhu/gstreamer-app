@@ -1,0 +1,9 @@
+*
+!*.c
+!*.h
+!*.xml
+!Makefile
+!.gitignore
+!*.orc
+!/sample/
+
