@@ -1,0 +1,4 @@
+<root>
+	<pipe>audiotestsrc ! appsrc</pipe>
+	<pipe>appsink ! queue ! autoaudiosink</pipe>
+</root>
