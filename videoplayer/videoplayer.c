@@ -3,6 +3,12 @@
 #include <libxml/parser.h>
 #include <libxml/tree.h>
 #include <string.h>
+#include <gst/app/gstappsink.h>
+#include <gst/app/gstappsrc.h>
+#include <unistd.h>
+
+#include "link.h"
+#include "gdef.h"
 
 #define MAX_PIPELINES    8
 
@@ -17,7 +23,13 @@ typedef struct _MPIPES{
 }MPIPES;
 
 
+
+
 static MPIPES mpipe;
+static Link glink;
+
+static void          appsrc_need_data_callback (GstAppSrc *src, guint length, gpointer user_data);
+static GstFlowReturn appsink_new_buffer_callback(GstAppSink *sink, gpointer user_data);
 
 static gboolean
 bus_call (GstBus     *bus,
@@ -62,7 +74,7 @@ on_pad_added (GstElement *element,
     GstPad *sinkpad;
     GstElement *decoder = (GstElement *) data;
 
-    /* We can now link this pad with the vorbis-decoder sink pad */
+    /* We can now glink this pad with the vorbis-decoder sink pad */
     g_print ("Dynamic pad created, linking demuxer/decoder\n");
 
     sinkpad = gst_element_get_static_pad (decoder, "sink");
@@ -141,6 +153,8 @@ main (int  argc, char *argv[])
     for(int i = 0; i < mpipe.nb_pipelines; i++){
         char name[1024];
 
+        g_print("## pipe:\"%s\" Creating!!\n", mpipe.pipes[i].cmd);
+        err = NULL;
         mpipe.pipes[i].pipeline = gst_parse_launch(mpipe.pipes[i].cmd, &err);
         if(!mpipe.pipes[i].pipeline){
             g_print("pipelines[%d] create failed!!!\n", i);
@@ -155,12 +169,49 @@ main (int  argc, char *argv[])
         gst_object_unref (bus);
     }
 
+    //add code to process the appsink and appsrc
+    GstAppSrcCallbacks appsrc_callbacks = {
+            appsrc_need_data_callback,
+            NULL,
+            NULL
+    };
+    GstAppSinkCallbacks appsink_callbacks = {
+            NULL,
+            NULL,
+            appsink_new_buffer_callback,
+            NULL
+    };
+    GstElement *p, *appsrc, *appsink;
 
+    appsink = gst_bin_get_by_name(mpipe.pipes[0].pipeline, "appsink0");
+    if(appsink == NULL){
+        printf("get appsink failed!\n");
+        return -1;
+    }
+    appsrc  = gst_bin_get_by_name(mpipe.pipes[1].pipeline, "appsrc0");
+    if(appsrc == NULL){
+        printf("get appsrc failed!\n");
+        return -1;
+    }
+
+    gst_app_sink_set_callbacks (GST_APP_SINK(appsink), &appsink_callbacks, &glink, NULL);
+    gst_object_unref (appsink);
+
+    gst_app_src_set_callbacks (GST_APP_SRC (appsrc), &appsrc_callbacks, &glink, NULL);
+    gst_object_unref (appsrc);
+
+
+    link_init(&glink, appsink, appsrc);
 
 
 
     for(int i = 0; i < mpipe.nb_pipelines; i ++){
-        gst_element_set_state (mpipe.pipes[i].pipeline, GST_STATE_PLAYING);
+        int ret = gst_element_set_state (mpipe.pipes[i].pipeline, GST_STATE_PLAYING);
+        av_print("set-pipe[%d] playing ret=%d\n", i, ret);
+        if (ret <= 0){
+            av_print("set_state[%d] failed!\n", i);
+            exit(1);
+        }
     }
 
 
@@ -183,4 +234,50 @@ main (int  argc, char *argv[])
     g_main_loop_unref (loop);
 
     return 0;
+}
+
+static void
+appsrc_need_data_callback (GstAppSrc *src, guint length, gpointer user_data)
+{
+    Link* link = (Link*)user_data;
+    GstBuffer *buffer;
+
+    while(g_queue_get_length(link->queue) <= 0){
+        av_print("link queue drain, waiting the data coming.\n");
+        usleep(GST_MSECOND);
+    }
+    av_print("---queue-length=%d\n", g_queue_get_length(link->queue));
+
+    g_mutex_lock(link->mutex);
+    buffer = g_queue_pop_head(link->queue);
+    g_mutex_unlock(link->mutex);
+
+    if (gst_app_src_push_buffer (src, buffer) != GST_FLOW_OK) {
+        GST_ERROR ("gst_app_src_push_buffer audio failure.");
+        return;
+    }
+
+}
+
+static GstFlowReturn
+appsink_new_buffer_callback(GstAppSink *sink, gpointer user_data)
+{
+    Link* link = (Link*)user_data;
+
+    GstBuffer *buffer;
+
+    av_print("+++queue-length=%d\n", g_queue_get_length(link->queue));
+    buffer = gst_app_sink_pull_buffer (GST_APP_SINK (sink));
+
+    if(link->caps == NULL && GST_BUFFER_CAPS (buffer)){
+        link->caps = gst_buffer_get_caps(buffer);
+
+        av_print("SetAppsrc caps:%s\n", gst_caps_to_string(link->caps));
+        gst_app_src_set_caps (link->appsrc, link->caps);
+    }
+
+    g_mutex_lock(link->mutex);
+    g_queue_push_tail(link->queue, buffer);
+    g_mutex_unlock(link->mutex);
+
 }

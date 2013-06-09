@@ -1,9 +1,9 @@
 PROG     = videoplayer
-OBJS     = $(PROG).o
+OBJS     = $(PROG).o link.o
 
-INCLUDE =-I./
-CFLAGS  = -std=c99 -O2 $(shell pkg-config --cflags gstreamer-controller-0.10) $(INCLUDE)
-LDLIBS  = $(shell pkg-config --libs gstreamer-controller-0.10)
+INCLUDE=
+CFLAGS  = -std=c99 -O2 $(shell pkg-config --cflags gstreamer-controller-0.10 gstreamer-app-0.10) $(INCLUDE)
+LDLIBS  = $(shell pkg-config --libs gstreamer-controller-0.10 gstreamer-app-0.10)
 
 .PHONY: clean
 

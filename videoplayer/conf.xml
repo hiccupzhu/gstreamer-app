@@ -1,4 +1,4 @@
 <root>
-	<pipe>audiotestsrc ! appsrc</pipe>
-	<pipe>appsink ! queue ! autoaudiosink</pipe>
+	<pipe>audiotestsrc ! appsink name=appsink0</pipe>
+	<pipe>appsrc name=appsrc0 ! queue ! autoaudiosink</pipe>
 </root>
